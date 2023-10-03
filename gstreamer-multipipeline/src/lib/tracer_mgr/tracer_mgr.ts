@@ -1,54 +1,47 @@
+import type { Writable } from "svelte/store";
 import { TracerRepository } from "../sockets";
 import type {
-  Element,
+  Object,
   Bin,
   Pipeline,
+  MessageType,
+  Pad,
 } from "../tracer_types";
+import TracerReconciler from "./reconciler";
 
 export interface GstTracerRepository {
-  element_queue: Element[];
   pipelines: Pipeline[];
   bins: Bin[];
+  object_map: Map<number, Object>;
+  pads: Pad[];
 }
 
 export default class TracerManager {
   private tracerSocket: WebSocket;
+  private messageReconciler: TracerReconciler;
 
-  constructor(tracerSocket: WebSocket) {
+  constructor(tracerSocket: WebSocket, tracerRepo: Writable<GstTracerRepository>) {
     this.tracerSocket = tracerSocket;
-    this.tracerSocket.onmessage = this.handleMessage.bind(this);
+    this.messageReconciler = new TracerReconciler(tracerRepo);
+    this.tracerSocket.onmessage = this.handleTracerMessage.bind(this);
   }
 
-  private handleMessage(event: MessageEvent) {
+  public handleTracerMessage(event: MessageEvent) {
     try {
       const message = JSON.parse(event.data);
       const type = this.parseMessageType(message);
-
-      // TracerRepository.update(messages => [...messages, event.data]);
+      
+      this.messageReconciler.handleMessage(type, message);
     } catch (e) {
       console.error("Issue parsing socket msg JSON", e);
     }
   }
 
-  private parseMessageType(message: any) {
-    try {
-      // switch(message.element_gtype) {
-      //     case ElementType.NewPad:
-      // }
-    } catch (e) {
-      console.error(
-        "[Message Error] Potential issue with structure of message",
-        e
-      );
+  public parseMessageType(message: any): MessageType {
+    const type: MessageType | null = message.type;
+    if (!type) {
+      throw new Error("No type msg, invalid");
     }
+    return type;
   }
-}
-
-// In source tests for tracer manager
-if (import.meta.vitest) {
-  const { it, expect } = import.meta.vitest;
-
-  it("should build pipeline messages as it receives them ", () => {
-
-  });
 }

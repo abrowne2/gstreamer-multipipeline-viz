@@ -4,9 +4,9 @@ import type { Bin, Pipeline } from "./tracer_types";
 
 /* A GES pipeline's bin is the encodebin. */
 export interface GESPipeline extends Pipeline {
-  urisink: Element;
+  urisink: Object;
   encodebin: Bin;
-  playsink: Element;
+  playsink: Object;
   timeline: GESTimeline;
 }
 
@@ -17,7 +17,7 @@ export interface GESTimeline extends Bin {
 }
 
 export interface GESLayer {
-  parent: Element;
+  parent: Object;
   timeline: GESTimeline;
   min_priority: number;
   max_priority: number;
@@ -42,7 +42,7 @@ export interface GESTrack extends Bin {
 }
 
 export interface GESTimelineElement {
-  parent: Element;
+  parent: Object;
   timeline: GESTimeline;
   start: number;
   inpoint: number;

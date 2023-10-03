@@ -21,7 +21,11 @@
     "vitest": "^0.34.5"
   },
   "dependencies": {
-    "svelvet": "^8.1.0",
+    "@msagl/core": "^1.1.16",
+    "@msagl/drawing": "^1.1.16",
+    "@msagl/parser": "^1.1.16",
+    "@msagl/renderer-svg": "^1.1.18",
+    "@msagl/renderer-webgl": "^1.1.18",
     "ws": "^8.14.2"
   }
 }
