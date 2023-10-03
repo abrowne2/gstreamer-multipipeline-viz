@@ -47,7 +47,7 @@ export enum MessageType {
     NewObject = "new-object",
     PropertyChanged = 'property-changed',
     ElementChangedState = "state-change",
-    ObjectDestroyed="object-destroyed", //when pipelines are destroyed and auto elements
+    ObjectDestroyed = "object-destroyed", //when pipelines are destroyed and auto elements
 }
 
 export enum PadDirection {
@@ -56,7 +56,7 @@ export enum PadDirection {
     Sink = "GST_PAD_SINK",
 }
 
-export interface Pad extends BaseMessage {
+export interface Pad extends Object {
     direction?: PadDirection;
     pad_id?: number;
     pad_name?: string;
@@ -72,15 +72,15 @@ export enum ElementState {
     Playing = "playing",
 }
 
-export interface Pipeline extends BaseMessage {
+export interface Pipeline extends Object {
     bin: Bin;
     stream_time: number;
 };
 
-export interface Bin extends BaseMessage {
+export interface Bin extends Object {
     polling: boolean;
     messages?: string[];
     num_children: number;
-    children: Element[];
+    children: Object[];
     pads: Pad[];
 };

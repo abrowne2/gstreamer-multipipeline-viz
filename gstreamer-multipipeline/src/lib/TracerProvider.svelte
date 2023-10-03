@@ -4,10 +4,8 @@
     import { type GstTracerRepository } from './tracer_mgr/tracer_mgr';
 
     const tracer_repo: Writable<GstTracerRepository> = writable({
-        pipelines: [],
+        pipelines: new Map(),
         object_map: new Map(),
-        bins: [],
-        pads: []
     });
 
     const tracer_server = new WebSocket('ws://localhost:8444');

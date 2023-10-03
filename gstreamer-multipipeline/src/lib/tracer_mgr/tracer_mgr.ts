@@ -10,10 +10,8 @@ import type {
 import TracerReconciler from "./reconciler";
 
 export interface GstTracerRepository {
-  pipelines: Pipeline[];
-  bins: Bin[];
   object_map: Map<number, Object>;
-  pads: Pad[];
+  pipelines: Map<number, Pipeline>;
 }
 
 export default class TracerManager {
@@ -28,9 +26,16 @@ export default class TracerManager {
 
   public handleTracerMessage(event: MessageEvent) {
     try {
-      const message = JSON.parse(event.data);
+      let message = JSON.parse(event.data);
       const type = this.parseMessageType(message);
       
+      // We prefer the underscores to hyphens
+      message = Object.entries(message).reduce((acc, [key, value]) => {
+        const newKey = key.replace(/-/g, '_');
+        acc[newKey] = value;
+        return acc;
+      }, {});
+
       this.messageReconciler.handleMessage(type, message);
     } catch (e) {
       console.error("Issue parsing socket msg JSON", e);

@@ -7,12 +7,16 @@ import {
   MessageType,
   GType,
   type Pad,
+  type BinAddMessage,
 } from "../tracer_types";
+import { get } from 'svelte/store';
 import type { GstTracerRepository } from "./tracer_mgr";
 
 enum ElementFactoryName {
-  None = "",
+  None = null,
+  Pipeline = "pipeline"
 }
+
 export default class TracerReconciler {
     public tracerRepo: Writable<GstTracerRepository>;
 
@@ -21,7 +25,6 @@ export default class TracerReconciler {
     }
   
     public handleMessage(type: MessageType, message: any) {
-        console.log(type)
         if (type.toString().includes("pad")) {
             this.handlePadMessage(type, message);
         } else if (type.toString().includes("bin")) {
@@ -34,9 +37,11 @@ export default class TracerReconciler {
     private handlePadMessage(type: MessageType, message: any) {
         switch (type) {
             case MessageType.NewPad:
-                // handle new pad
+                console.log('new pad msg', message)    
+            // handle new pad
                 break;
             case MessageType.PadLinked:
+                console.log('pad linked msg', message)
                 // handle pad linked
                 break;
             case MessageType.PadUnlinked:
@@ -53,7 +58,10 @@ export default class TracerReconciler {
     private handleBinMessage(type: MessageType, message: any) {
         switch (type) {
             case MessageType.BinAdded:
+                this.handleNewBinAdded(message);
                 // handle bin added
+
+                console.log("NEW STORE", get(this.tracerRepo))
                 break;
             case MessageType.BinRemoved:
                 // handle bin removed
@@ -74,50 +82,70 @@ export default class TracerReconciler {
             case MessageType.ObjectDestroyed:
                 // handle object destroyed
                 break;
+            case MessageType.PropertyChanged:
+                // property chaged -- update the object map.
+                break;
             default:
+                console.log(type, "invalid")
                 throw new Error("Invalid general message type");
         }
     }
 
-  public handleNewElement(message: any) {
-    // Extract the factory name, gtype and objectid from the message
-    const factoryName = message.element_factory;
+    public handleNewElement(message: any) {
 
-    // Create a new element based on the factory name
-    switch(factoryName) {
-        case ElementFactoryName.None.valueOf():
-            const gType = message.element_gtype;
-            console.log('gType msg type', gType)
-            switch(gType) {
-                case GType.Pipeline.valueOf():
-                    console.log('Received new pipeline message', message.element_name)
-                    this.handleNewPipeline(message);
-                    break;
-                case GType.Bin.valueOf():
-                    console.log('Received new bin message', message.element_name)
-                    this.handleNewBin(message);
-                    break;
-                default:
-                    console.log('Received new element message', message.element_name);
-                    break;
-            }
-            break;
-        default:
-            break;
+        const factoryName = message.element_factory;
+        
+        // Create a new element based on the factory name
+        switch(factoryName) {
+            case ElementFactoryName.Pipeline.valueOf():
+                console.log("recieved new pipeline", message)
+                this.handleNewPipeline(message);  
+                break;
+            case ElementFactoryName.None:
+                const gType = message.element_gtype;
+                
+                switch(gType) {
+                    case GType.Pad.valueOf():
+                        console.log('Received new pad message', message.element_name);
+                        this.handleNewPad(message);
+                        break;
+                    default:
+                        console.log('Received new element message', message);
+                        break;
+                }
+                break;
+            default:
+                // New, not categorized object
+                const objectId: number = message.object_id;
+                
+                let newObject: Object = {
+                    ...message,
+                };
+                console.log("new ELE", newObject)
+                this.tracerRepo.update(store => {
+                    store.object_map.set(objectId, newObject);
+                    return store;
+                });
+                break;
+        }
     }
-  }
 
   public handleNewPipeline(message: any) {
     const objectId: number = message.object_id;
 
     let newPipeline: Pipeline = {
         ...message,
-        bin: null,
+        bin: {
+            polling: false,
+            num_children: 0,
+            children: [],
+            messages: [],
+        },
         stream_time: 0,
     };
 
     this.tracerRepo.update(store => {
-        store.pipelines.push(newPipeline);
+        store.pipelines.set(objectId, newPipeline);
 
         store.object_map.set(objectId, newPipeline);
 
@@ -125,24 +153,79 @@ export default class TracerReconciler {
     });
   }
 
-  public handleNewBin(message: any) {
+  public handleNewBinAdded(message: any) {
     const objectId: number = message.object_id;
+    
+    let binAddMsg: BinAddMessage = {
+        ...message,
+    };
+
+    const binId: number = binAddMsg.bin_id;
+    const element_id: number = binAddMsg.element_id;
+    
     let newBin: Bin = {
         ...message,
         polling: false,
         messages: [],
     };
 
+    // for this bin, check if it gets added to another object in the area.
     this.tracerRepo.update(store => {
-        store.bins.push(newBin);
+        
+        // Check if this binId already exists inside the object map
+        if (store.object_map.has(binId)) {
+            // console.warn(`Bin with id ${binId} already exists in object map.`);
+        } else {
+            store.object_map.set(objectId, newBin);
+        }
 
-        store.object_map.set(objectId, newBin);
+        // get the element that is being added to this bin
+        let element = store.object_map.get(element_id);
+        let bin_pipeline = store.pipelines.get(binId);
+        let newStore = null;
 
-        return store;
+        if (bin_pipeline) {
+            // add the bin to the pipeline
+            bin_pipeline.bin.children.push(element);
+            bin_pipeline.bin.num_children++;
+ 
+            let updatedPipeline = new Map(store.pipelines);
+            updatedPipeline.set(binId, bin_pipeline);
+    
+            newStore = {
+                ...store,
+                pipelines: updatedPipeline
+            };
+        } else {
+            // check if the object map has the element
+            if (!store.object_map.has(binId)) {
+                console.error(`Element with id ${element_id} not found in object map.`);
+
+                newStore = store;
+            } else {
+                // get the element
+                let binElement = store.object_map.get(binId) as Bin;
+                
+                // add the element to the bin
+                binElement.children.push(element);
+                binElement.num_children++;
+
+                let newObjectMap = new Map(store.object_map);
+                newObjectMap.set(binId, binElement);
+
+                newStore = {
+                    ...store,
+                    object_map: newObjectMap
+                }
+            }
+        }
+        
+        return newStore;
     });
   }
 
   public handleNewPad(message: any) {
+    
     const objectId: number = message.object_id;
 
     let newPad: Pad = {
@@ -154,8 +237,6 @@ export default class TracerReconciler {
     };
 
     this.tracerRepo.update(store => {
-        store.pads.push(newPad);
-
         store.object_map.set(objectId, newPad);
 
         return store;
@@ -188,113 +269,4 @@ export default class TracerReconciler {
         })
     }
   }
-//   public handlePadLinked(message: any) {
-//     // Extract the source and destination pads from the message
-//     const sourcePadId = message.source;
-//     const destPadId = message.destination;
-
-//     // Get the source and destination pads from your data structure
-//     const sourcePad = this.getPadById(sourcePadId);
-//     const destPad = this.getPadById(destPadId);
-
-//     // Link the source pad to the destination pad
-//     sourcePad.link(destPad);
-//   }
-
-//   public handlePadUnlinked(message: any) {
-//     // Extract the source and destination pads from the message
-//     const sourcePadId = message.source;
-//     const destPadId = message.destination;
-
-//     // Get the source and destination pads from your data structure
-//     const sourcePad = this.getPadById(sourcePadId);
-//     const destPad = this.getPadById(destPadId);
-
-//     // Unlink the source pad from the destination pad
-//     sourcePad.unlink(destPad);
-//   }
-
-//   public handlePadRemoved(message: any) {
-//     // Extract the pad id from the message
-//     const padId = message.padId;
-
-//     // Get the pad from your data structure
-//     const pad = this.getPadById(padId);
-
-//     // Remove the pad from its source and destination elements
-//     pad.sourceElement.removePad(pad);
-//     pad.destElement.unlinkPad(pad);
-
-//     // Remove the pad from your data structure
-//     this.removePadById(padId);
-//   }
-
-//   public handleBinAdded(message: any) {
-//     // Extract the bin id from the message
-//     const binId = message.binId;
-
-//     // Create a new bin
-//     const newBin = new Bin(binId);
-
-//     // Add the new bin to your data structure
-//     this.tracerRepo.bins.push(newBin);
-//   }
-
-//   public handleBinRemoved(message: any) {
-//     // Extract the bin id from the message
-//     const binId = message.binId;
-
-//     // Get the bin from your data structure
-//     const bin = this.getBinById(binId);
-
-//     // Remove the bin from your data structure
-//     this.tracerRepo.bins = this.tracerRepo.bins.filter(b => b.id !== binId);
-//   }
-
-//   public handleElementChangedState(message: any) {
-//     // Extract the element id and the new state from the message
-//     const elementId = message.elementId;
-//     const newState = message.newState;
-
-//     // Get the element from your data structure
-//     const element = this.getElementById(elementId);
-
-//     // Update the state of the element
-//     element.state = newState;
-//   }
-
-//   public handleObjectDestroyed(message: any) {
-//     // Extract the object id from the message
-//     const objectId = message.objectId;
-
-//     // Remove the object from your data structure
-//     delete this.tracerRepo.elements[objectId];
-//   }
-  
-//   public handleNewPad(message: any) {
-//     // what happens with a new pad?
-//     // Get its source and destination element
-//     // establish the new pad
-//     // link and add it
-    
-// //     // Extract the source and destination elements from the message
-// //     const sourceElementId = message.source;
-// //     const destElementId = message.destination;
-
-// //     // Get the source and destination elements from your data structure
-// //     const sourceElement = this.getElementById(sourceElementId);
-// //     const destElement = this.getElementById(destElementId);
-
-// //     // Create a new pad
-// //     const newPad = new Pad(message.padId, sourceElement, destElement);
-
-// //     // Add the new pad to the source element
-// //     sourceElement.addPad(newPad);
-
-// //     // Link the new pad to the destination element
-// //     destElement.linkPad(newPad);
-    
-//   }
-
-
 }
